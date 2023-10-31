@@ -1,15 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-        <title>Websocket Audio Demo</title>
-    </head>
-    <body>
-        <h1> Websocket Audio Demo</h1>
-        <audio id="audioPlayer" controls autoplay></audio>
-        <dev id="bitrate"></div>
-        <script src="script.js"></script>
-    </body>
+<html>
+<head>
+    <title>Websocket Audio Demo</title>
+</head>
+<body>
+    <button id="playButton" onclick="playNextAudioBuffer()">Play</button>
+
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        let audioPlayer;
+        let isPlaying = false;
+        let receivedBuffers = [];
+
+        const ws = new WebSocket('ws://localhost:8080/ws');
+
+        ws.binaryType = 'arraybuffer';
+
+        ws.onmessage = (event) => {
+            const arrayBuffer = event.data;
+
+            // Convert the received audio data 16-BIT PCM to float32
+            const intData = new Int16Array(arrayBuffer);
+            const floatData = new Float32Array(intData.length);
+
+            for (let i = 0; i < intData.length; i++) {
+                floatData[i] = intData[i] / 32768.0;
+            }
+
+            const audioBuffer = audioContext.createBuffer(1, floatData.length, audioContext.sampleRate);
+            audioBuffer.getChannelData(0).set(floatData);
+            receivedBuffers.push(audioBuffer);
+        };
+
+        ws.onclose = () => {
+            audioContext.close();
+        };
+
+        function playNextAudioBuffer() {
+            if (receivedBuffers.length > 0) {
+                console.log(receivedBuffers.length)
+                const audioBuffer = receivedBuffers.shift();
+                playAudioBuffer(audioBuffer);
+            } else {
+                console.log("no buffer?")
+            }
+        }
+
+        function playAudioBuffer(buffer) {
+            audioPlayer = audioContext.createBufferSource();
+            audioPlayer.buffer = buffer;
+            audioPlayer.connect(audioContext.destination);
+            audioPlayer.start();
+           isPlaying = true;
+
+            audioPlayer.onended = () => {
+                console.log("Audio end, attempting to play next buffer")
+                isPlaying = false;
+                playNextAudioBuffer();
+            };
+        }
+    </script>
+</body>
 </html>
+

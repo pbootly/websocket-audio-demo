@@ -47,11 +47,17 @@ func streamFile(file string, ac *AudioChannel) {
 		log.Fatal("Unable to read file", err)
 		return
 	}
+	bufferSize := 128000 // High water mark
 
 	defer f.Close()
 
+	wavHeader := parseWAVHeader(f)
+	select {
+	case ac.channel <- wavHeader:
+	}
+
+	buffer := make([]byte, bufferSize)
 	for {
-		buffer := make([]byte, 256)
 		n, err := f.Read(buffer)
 		if err != nil {
 			if err == io.EOF {
@@ -64,5 +70,13 @@ func streamFile(file string, ac *AudioChannel) {
 		case ac.channel <- buffer[:n]:
 		}
 	}
+}
 
+func parseWAVHeader(file *os.File) []byte {
+	header := make([]byte, 44)
+	_, err := file.Read(header)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return header
 }
