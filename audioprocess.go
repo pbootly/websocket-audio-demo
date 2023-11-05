@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"time"
+
+	"github.com/go-audio/wav"
 )
 
 type AudioChannel struct {
@@ -21,8 +23,8 @@ func (ac *AudioChannel) processAudio() {
 	files := getFiles("./audio_files/")
 	for {
 		for _, f := range files {
+			// WAV files supported only
 			streamFile(f, ac)
-			time.Sleep(1 * time.Second)
 		}
 	}
 }
@@ -47,10 +49,14 @@ func streamFile(file string, ac *AudioChannel) {
 		log.Fatal("Unable to read file", err)
 		return
 	}
-	bufferSize := 128000 // High water mark
-
 	defer f.Close()
 
+	decoder := wav.NewDecoder(f)
+	if !decoder.IsValidFile() {
+		log.Println("Skipping non wav file: ", f.Name())
+		return
+	}
+	bufferSize := 128000 // High water mark
 	wavHeader := parseWAVHeader(f)
 	select {
 	case ac.channel <- wavHeader:
@@ -62,6 +68,7 @@ func streamFile(file string, ac *AudioChannel) {
 		if err != nil {
 			if err == io.EOF {
 				log.Printf("File %s parsed\n", file)
+				time.Sleep(22 * time.Second)
 				break
 			}
 			log.Fatal(err)
@@ -70,6 +77,7 @@ func streamFile(file string, ac *AudioChannel) {
 		case ac.channel <- buffer[:n]:
 		}
 	}
+
 }
 
 func parseWAVHeader(file *os.File) []byte {

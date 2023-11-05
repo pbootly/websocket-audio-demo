@@ -7,7 +7,7 @@
     <button id="playButton" onclick="playNextAudioBuffer()">Play</button>
 
     <script>
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        /*const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         let audioPlayer;
         let isPlaying = false;
         let receivedBuffers = [];
@@ -30,6 +30,7 @@
             const audioBuffer = audioContext.createBuffer(1, floatData.length, audioContext.sampleRate);
             audioBuffer.getChannelData(0).set(floatData);
             receivedBuffers.push(audioBuffer);
+            console.log(audioBuffer)
         };
 
         ws.onclose = () => {
@@ -51,14 +52,31 @@
             audioPlayer.buffer = buffer;
             audioPlayer.connect(audioContext.destination);
             audioPlayer.start();
-           isPlaying = true;
+            isPlaying = true;
+            console.log(audioPlayer)
 
             audioPlayer.onended = () => {
                 console.log("Audio end, attempting to play next buffer")
                 isPlaying = false;
                 playNextAudioBuffer();
             };
-        }
+        }*/
+
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        webSocket = new WebSocket('ws://localhost:8080/ws');
+        webSocket.binaryType = 'arraybuffer'
+        webSocket.onmessage = function(message) {
+            var arrayBuffer = message.data // wav from server, as arraybuffer
+            var source = audioContext.createBufferSource();
+            audioContext.decodeAudioData(arrayBuffer, function(buffer){
+                source.buffer = buffer
+                source.connect(audioContext.destination)
+                source.start(time);
+                time += source.buffer.duration
+            }, function(){
+                console.log('error')
+            })
+        };
     </script>
 </body>
 </html>

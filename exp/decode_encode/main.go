@@ -15,9 +15,10 @@ import (
 
 // First test - chunk files and re-assemble into their own .wav files
 
-func decodeChunk(file *os.File, chunkTime uint32) (*wav.Decoder, *audio.IntBuffer) {
-	d := wav.NewDecoder(file)
+// decodeChunk returns a decoder and an audio int buffer for a given .wav file and desired time
+func decodeChunk(chunkTime uint32, d *wav.Decoder) (*audio.IntBuffer, bool) {
 	d.ReadInfo()
+	done := false
 	var buf *audio.IntBuffer
 	numSamples := int(chunkTime * d.SampleRate)
 	numChannels := int(d.NumChans)
@@ -27,34 +28,17 @@ func decodeChunk(file *os.File, chunkTime uint32) (*wav.Decoder, *audio.IntBuffe
 		Data:   make([]int, intBufferSize),
 	}
 	d.PCMBuffer(buf)
-	if d.EOF() {
-		return d, buf
+	if d.EOF() || isEnd(buf.Data) {
+		log.Println("EOF")
+		done = true
+		return buf, done
 	}
-	return d, buf
+	return buf, done
 }
 
-func writeOut() {
-
-}
-
-func main() {
-	server := flag.Bool("server", false, "Start server")
-	flag.Parse()
-	if *server {
-		log.Println("server")
-	} else {
-		log.Println("client")
-	}
-
-	// Testing
-	file, err := os.Open("./we-the-people.wav")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file.Close()
-
-	d, buf := decodeChunk(file, 5)
-	out, err := os.Create("./kick.wav")
+func writeOut(chunkNo int, buf *audio.IntBuffer, d *wav.Decoder) {
+	fout := fmt.Sprintf("./output/%d.wav", chunkNo)
+	out, err := os.Create(fout)
 	if err != nil {
 		panic(fmt.Sprintf("couldn't create output file - %v", err))
 	}
@@ -74,13 +58,40 @@ func main() {
 	}
 	out.Close()
 
-	out, err = os.Open("./kick.wav")
-	if err != nil {
-		panic(err)
+}
+
+func isEnd(slice []int) bool {
+	for _, v := range slice {
+		if v != 0 {
+			return false
+		}
 	}
-	d2 := wav.NewDecoder(out)
-	d2.ReadInfo()
-	fmt.Println("new:", d2)
-	out.Close()
-	//os.Remove(out.Name())
+	return true
+}
+
+func main() {
+	server := flag.Bool("server", false, "Start server")
+	flag.Parse()
+	if *server {
+		log.Println("server")
+	} else {
+		log.Println("client")
+	}
+
+	file, err := os.Open("./we-the-people.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
+	d := wav.NewDecoder(file)
+	i := 0
+	for {
+		buf, done := decodeChunk(5, d)
+		if done {
+			break
+		}
+		writeOut(i, buf, d)
+		i++
+	}
 }
