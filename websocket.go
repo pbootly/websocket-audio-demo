@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
@@ -20,14 +21,14 @@ type ClientList map[*Client]bool
 type Client struct {
 	connection *websocket.Conn
 	hub        *Hub
-	transmit   chan []byte
+	transmit   chan AudioChunk
 }
 
 func newClient(conn *websocket.Conn, hub *Hub) *Client {
 	return &Client{
 		connection: conn,
 		hub:        hub,
-		transmit:   make(chan []byte),
+		transmit:   make(chan AudioChunk),
 	}
 }
 
@@ -94,14 +95,15 @@ func (c *Client) sendMessage() {
 
 	for {
 		select {
-		case message, ok := <-c.transmit:
+		case audioChunk, ok := <-c.transmit:
+			audioMsg, _ := serializeAudioChunk(audioChunk)
 			if !ok {
 				if err := c.connection.WriteMessage(websocket.CloseMessage, nil); err != nil {
 					log.Println("connection closed")
 				}
 				return
 			}
-			if err := c.connection.WriteMessage(websocket.BinaryMessage, message); err != nil {
+			if err := c.connection.WriteMessage(websocket.TextMessage, audioMsg); err != nil {
 				log.Println("Send Error: ", err)
 				return
 			}
@@ -111,3 +113,22 @@ func (c *Client) sendMessage() {
 	}
 
 }
+
+func serializeAudioChunk(chunk AudioChunk) ([]byte, error) {
+	// Serialize AudioChunk to JSON
+	jsonData, err := json.Marshal(chunk)
+	if err != nil {
+		return nil, err
+	}
+	return jsonData, nil
+}
+
+/*
+func serializeAudioChunk(audioChunk AudioChunk) []byte {
+	size := len(audioChunk.Data) * 4 // 32 Bit
+	binaryData := make([]byte, size)
+	for i, val := range audioChunk.Data {
+		binary.LittleEndian.PutUint32(binaryData[i*4:], uint32(val))
+	}
+	return binaryData
+}*/

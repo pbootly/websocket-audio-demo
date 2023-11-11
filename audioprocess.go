@@ -1,30 +1,61 @@
 package main
 
 import (
-	"io"
 	"log"
 	"os"
-	"time"
 
+	"github.com/go-audio/audio"
 	"github.com/go-audio/wav"
 )
 
 type AudioChannel struct {
-	channel chan []byte
+	channel chan AudioChunk
+}
+
+type AudioChunk struct {
+	Data        []int
+	Format      *audio.Format
+	BitDepth    int
+	AudioFormat int
 }
 
 func newAudioChannel() *AudioChannel {
 	return &AudioChannel{
-		channel: make(chan []byte),
+		channel: make(chan AudioChunk),
 	}
 }
 
 func (ac *AudioChannel) processAudio() {
 	files := getFiles("./audio_files/")
 	for {
-		for _, f := range files {
-			// WAV files supported only
-			streamFile(f, ac)
+		for _, file := range files {
+			f, err := os.Open(file)
+			if err != nil {
+				log.Fatal("Read file", err)
+				return
+			}
+			defer f.Close()
+
+			decoder := wav.NewDecoder(f)
+			/*parsed = streamFile(decoder, ac)
+			if parsed {
+				f.Close()
+			}*/
+			for {
+				buffer, done := decodeChunk(5, decoder)
+				if done {
+					break
+				}
+				chunk := AudioChunk{
+					Data:        buffer.Data,
+					Format:      buffer.Format,
+					BitDepth:    int(decoder.BitDepth),
+					AudioFormat: int(decoder.WavAudioFormat),
+				}
+				select {
+				case ac.channel <- chunk:
+				}
+			}
 		}
 	}
 }
@@ -43,48 +74,31 @@ func getFiles(dir string) []string {
 	return r
 }
 
-func streamFile(file string, ac *AudioChannel) {
-	f, err := os.Open(file)
-	if err != nil {
-		log.Fatal("Unable to read file", err)
-		return
+func decodeChunk(chunkTime uint32, d *wav.Decoder) (*audio.IntBuffer, bool) {
+	d.ReadInfo()
+	done := false
+	var buf *audio.IntBuffer
+	numSamples := int(chunkTime * d.SampleRate)
+	numChannels := int(d.NumChans)
+	intBufferSize := numChannels * numSamples
+	buf = &audio.IntBuffer{
+		Format: d.Format(),
+		Data:   make([]int, intBufferSize),
 	}
-	defer f.Close()
-
-	decoder := wav.NewDecoder(f)
-	if !decoder.IsValidFile() {
-		log.Println("Skipping non wav file: ", f.Name())
-		return
+	d.PCMBuffer(buf)
+	if d.EOF() || isAudioBufferEnd(buf.Data) {
+		log.Println("EOF")
+		done = true
+		return buf, done
 	}
-	bufferSize := 128000 // High water mark
-	wavHeader := parseWAVHeader(f)
-	select {
-	case ac.channel <- wavHeader:
-	}
-
-	buffer := make([]byte, bufferSize)
-	for {
-		n, err := f.Read(buffer)
-		if err != nil {
-			if err == io.EOF {
-				log.Printf("File %s parsed\n", file)
-				time.Sleep(22 * time.Second)
-				break
-			}
-			log.Fatal(err)
-		}
-		select {
-		case ac.channel <- buffer[:n]:
-		}
-	}
-
+	return buf, done
 }
 
-func parseWAVHeader(file *os.File) []byte {
-	header := make([]byte, 44)
-	_, err := file.Read(header)
-	if err != nil {
-		log.Fatal(err)
+func isAudioBufferEnd(slice []int) bool {
+	for _, v := range slice {
+		if v != 0 {
+			return false
+		}
 	}
-	return header
+	return true
 }
