@@ -19,6 +19,13 @@ type AudioChunk struct {
 	AudioFormat int
 }
 
+type ProcessChunk struct {
+	TimeRemaining float64
+	NoChunks      int
+}
+
+const CHUNKTIME = 5 // Process in 5 second chunks
+
 func newAudioChannel() *AudioChannel {
 	return &AudioChannel{
 		channel: make(chan AudioChunk),
@@ -29,34 +36,53 @@ func (ac *AudioChannel) processAudio() {
 	files := getFiles("./audio_files/")
 	for {
 		for _, file := range files {
-			f, err := os.Open(file)
-			if err != nil {
-				log.Fatal("Read file", err)
-				return
-			}
-			defer f.Close()
-
-			decoder := wav.NewDecoder(f)
-			/*parsed = streamFile(decoder, ac)
-			if parsed {
-				f.Close()
-			}*/
-			for {
-				buffer, done := decodeChunk(5, decoder)
-				if done {
-					break
-				}
-				chunk := AudioChunk{
-					Data:        buffer.Data,
-					Format:      buffer.Format,
-					BitDepth:    int(decoder.BitDepth),
-					AudioFormat: int(decoder.WavAudioFormat),
-				}
-				select {
-				case ac.channel <- chunk:
-				}
-			}
+			ac.processAudioFile(file)
 		}
+	}
+}
+
+func (ac *AudioChannel) processAudioFile(file string) {
+	f, err := os.Open(file)
+	if err != nil {
+		log.Fatal("Read file", file)
+		return
+	}
+	defer f.Close()
+
+	decoder := wav.NewDecoder(f)
+	prepared := prepareAudio(decoder)
+	processed := false
+	for !processed {
+		buffer, isProcessed := prepared.decodeChunk(CHUNKTIME, decoder)
+		processed = isProcessed
+		chunk := createAudioChunk(buffer, decoder)
+		select {
+		case ac.channel <- chunk:
+		}
+	}
+
+}
+
+func prepareAudio(d *wav.Decoder) *ProcessChunk {
+	d.ReadInfo()
+	audioTime, err := d.Duration()
+	at := audioTime.Seconds()
+	if err != nil {
+		log.Fatal("Unable to determine audio duration", err)
+	}
+	numChunks := int(at) / CHUNKTIME
+	return &ProcessChunk{
+		TimeRemaining: at,
+		NoChunks:      numChunks,
+	}
+}
+
+func createAudioChunk(buffer *audio.IntBuffer, decoder *wav.Decoder) AudioChunk {
+	return AudioChunk{
+		Data:        buffer.Data,
+		Format:      buffer.Format,
+		BitDepth:    int(decoder.BitDepth),
+		AudioFormat: int(decoder.WavAudioFormat),
 	}
 }
 
@@ -74,24 +100,29 @@ func getFiles(dir string) []string {
 	return r
 }
 
-func decodeChunk(chunkTime uint32, d *wav.Decoder) (*audio.IntBuffer, bool) {
-	d.ReadInfo()
-	done := false
-	var buf *audio.IntBuffer
+func (p *ProcessChunk) decodeChunk(chunkTime uint32, d *wav.Decoder) (buf *audio.IntBuffer, done bool) {
+	if p.TimeRemaining < float64(chunkTime) {
+		chunkTime = uint32(p.TimeRemaining)
+	}
+
+	p.TimeRemaining = p.TimeRemaining - float64(chunkTime)
+
 	numSamples := int(chunkTime * d.SampleRate)
 	numChannels := int(d.NumChans)
 	intBufferSize := numChannels * numSamples
-	buf = &audio.IntBuffer{
-		Format: d.Format(),
-		Data:   make([]int, intBufferSize),
-	}
+
+	buf = createIntBuffer(d, intBufferSize)
 	d.PCMBuffer(buf)
-	if d.EOF() || isAudioBufferEnd(buf.Data) {
-		log.Println("EOF")
-		done = true
-		return buf, done
-	}
+
+	done = d.EOF() || isAudioBufferEnd(buf.Data)
 	return buf, done
+}
+
+func createIntBuffer(d *wav.Decoder, bufferSize int) *audio.IntBuffer {
+	return &audio.IntBuffer{
+		Format: d.Format(),
+		Data:   make([]int, bufferSize),
+	}
 }
 
 func isAudioBufferEnd(slice []int) bool {

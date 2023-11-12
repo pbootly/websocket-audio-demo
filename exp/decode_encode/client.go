@@ -51,7 +51,7 @@ func RunClient() {
 				readIn(i, audio)
 				i++
 			}
-			if i > 100 {
+			if i > 20 {
 				break
 			}
 		}
